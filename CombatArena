@@ -4,124 +4,94 @@ local UserInputService = game:GetService("UserInputService")
 local camera = workspace.CurrentCamera
 
 local espEnabled = false
-local espTags = {} -- เก็บ BillboardGui ของแต่ละคน
-local espConnection = nil
+local espLines = {}
 
-local lockTargetEnabled = false
-local lockedPlayer = nil
-local lockConnection = nil
-
-function createNameTag(player)
-    local billboardGui = Instance.new("BillboardGui")
-    billboardGui.Name = "ESPNameTag"
-    billboardGui.Adornee = player.Character.Head
-    billboardGui.AlwaysOnTop = true
-    billboardGui.Size = UDim2.new(0, 100, 0, 30)
-    billboardGui.StudsOffset = Vector3.new(0, 2, 0)
-    billboardGui.Parent = player.Character.Head
-
-    local textLabel = Instance.new("TextLabel")
-    textLabel.Size = UDim2.new(1,0,1,0)
-    textLabel.BackgroundTransparency = 1
-    textLabel.TextColor3 = Color3.new(1, 0, 0) -- สีแดง
-    textLabel.TextStrokeTransparency = 0.5
-    textLabel.Font = Enum.Font.SourceSansBold
-    textLabel.TextScaled = true
-    textLabel.Text = player.Name
-    textLabel.Parent = billboardGui
-
-    return billboardGui
-end
-
+-- ฟังก์ชันเปิด-ปิด ESP
 function toggleESP()
     espEnabled = not espEnabled
 
-    if espEnabled then
-        espConnection = RunService.RenderStepped:Connect(function()
-            local localPlayer = Players.LocalPlayer
-            if not localPlayer.Character or not localPlayer.Team then return end
-
-            for _, player in pairs(Players:GetPlayers()) do
-                if player ~= localPlayer 
-                   and player.Character 
-                   and player.Character:FindFirstChild("Head") 
-                   and player.Team ~= localPlayer.Team then
-
-                    if not espTags[player] then
-                        espTags[player] = createNameTag(player)
-                    end
-                else
-                    if espTags[player] then
-                        espTags[player]:Destroy()
-                        espTags[player] = nil
-                    end
-                end
-            end
-        end)
-    else
-        if espConnection then
-            espConnection:Disconnect()
-            espConnection = nil
+    if not espEnabled then
+        for _, line in pairs(espLines) do
+            line:Destroy()
         end
-
-        for _, tag in pairs(espTags) do
-            tag:Destroy()
-        end
-        espTags = {}
+        espLines = {}
     end
 end
 
-function toggleLockTarget()
-    lockTargetEnabled = not lockTargetEnabled
+-- ฟังก์ชันสร้างเส้น V สำหรับผู้เล่น
+function createLineForPlayer(player)
+    local line = Drawing.new("Line")
+    line.Color = Color3.new(1, 0, 0) -- สีแดง
+    line.Thickness = 2
+    line.Transparency = 1
+    line.Visible = true
+    return line
+end
 
-    if lockTargetEnabled then
-        local localPlayer = Players.LocalPlayer
-        if not localPlayer.Character or not localPlayer.Team then return end
+-- ฟังก์ชันตรวจว่าโหมดปัจจุบันเป็น Deathmatch หรือไม่
+local function isDeathmatchMode()
+    local localPlayer = Players.LocalPlayer
 
-        local closestPlayer = nil
-        local shortestDistance = math.huge
-        for _, player in pairs(Players:GetPlayers()) do
-            if player ~= localPlayer 
-               and player.Character 
-               and player.Character:FindFirstChild("Head") 
-               and player.Team ~= localPlayer.Team then
+    -- ตัวอย่างเงื่อนไข ตรวจสอบจากชื่อทีม หรือค่าตัวแปรใน Workspace หรือ Map
+    -- แก้ไขตามเกมจริง เช่น:
+    -- return workspace.GameMode and workspace.GameMode.Value == "Deathmatch"
+    -- หรือถ้าไม่มีทีมเลยถือเป็น Deathmatch
+    return (not localPlayer.Team) or (localPlayer.Team.Name == "None")
+end
+
+-- อัพเดตเส้น ESP ทุกเฟรม
+RunService.RenderStepped:Connect(function()
+    if not espEnabled then return end
+
+    local screenCenter = Vector2.new(camera.ViewportSize.X / 2, camera.ViewportSize.Y / 2)
+    local deathmatch = isDeathmatchMode()
+    local localPlayer = Players.LocalPlayer
+
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= localPlayer 
+           and player.Character 
+           and player.Character:FindFirstChild("Head") then
+
+            local showESP = false
+            if deathmatch then
+                showESP = true -- แสดงทุกคนในโหมด Deathmatch
+            else
+                if localPlayer.Team and player.Team and player.Team ~= localPlayer.Team then
+                    showESP = true -- แสดงเฉพาะศัตรู
+                end
+            end
+
+            if showESP then
                 local headPos = player.Character.Head.Position
-                local dist = (headPos - camera.CFrame.Position).Magnitude
-                if dist < shortestDistance then
-                    shortestDistance = dist
-                    closestPlayer = player
+                local screenPos, _ = camera:WorldToViewportPoint(headPos)
+
+                if not espLines[player] then
+                    espLines[player] = createLineForPlayer(player)
+                end
+
+                espLines[player].From = screenCenter
+                espLines[player].To = Vector2.new(screenPos.X, screenPos.Y)
+                espLines[player].Visible = true
+            else
+                if espLines[player] then
+                    espLines[player]:Destroy()
+                    espLines[player] = nil
                 end
             end
-        end
-        lockedPlayer = closestPlayer
-
-        lockConnection = RunService.RenderStepped:Connect(function()
-            if lockedPlayer 
-               and lockedPlayer.Character 
-               and lockedPlayer.Character:FindFirstChild("Head") then
-
-                local headPos = lockedPlayer.Character.Head.Position
-                local cameraPos = camera.CFrame.Position
-                local newCFrame = CFrame.new(cameraPos, headPos)
-                camera.CFrame = newCFrame
+        else
+            if espLines[player] then
+                espLines[player]:Destroy()
+                espLines[player] = nil
             end
-        end)
-    else
-        if lockConnection then
-            lockConnection:Disconnect()
-            lockConnection = nil
         end
-        lockedPlayer = nil
     end
-end
+end)
 
--- เปิดปิด ESP ด้วยปุ่ม V และ LockTarget ด้วย B
+-- ควบคุมเปิดปิด ESP ด้วยปุ่ม V
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
 
     if input.KeyCode == Enum.KeyCode.V then
         toggleESP()
-    elseif input.KeyCode == Enum.KeyCode.B then
-        toggleLockTarget()
     end
 end)

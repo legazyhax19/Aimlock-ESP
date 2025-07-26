@@ -1,0 +1,127 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local camera = workspace.CurrentCamera
+
+local espEnabled = false
+local espTags = {} -- เก็บ BillboardGui ของแต่ละคน
+local espConnection = nil
+
+local lockTargetEnabled = false
+local lockedPlayer = nil
+local lockConnection = nil
+
+function createNameTag(player)
+    local billboardGui = Instance.new("BillboardGui")
+    billboardGui.Name = "ESPNameTag"
+    billboardGui.Adornee = player.Character.Head
+    billboardGui.AlwaysOnTop = true
+    billboardGui.Size = UDim2.new(0, 100, 0, 30)
+    billboardGui.StudsOffset = Vector3.new(0, 2, 0)
+    billboardGui.Parent = player.Character.Head
+
+    local textLabel = Instance.new("TextLabel")
+    textLabel.Size = UDim2.new(1,0,1,0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.TextColor3 = Color3.new(1, 0, 0) -- สีแดง
+    textLabel.TextStrokeTransparency = 0.5
+    textLabel.Font = Enum.Font.SourceSansBold
+    textLabel.TextScaled = true
+    textLabel.Text = player.Name
+    textLabel.Parent = billboardGui
+
+    return billboardGui
+end
+
+function toggleESP()
+    espEnabled = not espEnabled
+
+    if espEnabled then
+        espConnection = RunService.RenderStepped:Connect(function()
+            local localPlayer = Players.LocalPlayer
+            if not localPlayer.Character or not localPlayer.Team then return end
+
+            for _, player in pairs(Players:GetPlayers()) do
+                if player ~= localPlayer 
+                   and player.Character 
+                   and player.Character:FindFirstChild("Head") 
+                   and player.Team ~= localPlayer.Team then
+
+                    if not espTags[player] then
+                        espTags[player] = createNameTag(player)
+                    end
+                else
+                    if espTags[player] then
+                        espTags[player]:Destroy()
+                        espTags[player] = nil
+                    end
+                end
+            end
+        end)
+    else
+        if espConnection then
+            espConnection:Disconnect()
+            espConnection = nil
+        end
+
+        for _, tag in pairs(espTags) do
+            tag:Destroy()
+        end
+        espTags = {}
+    end
+end
+
+function toggleLockTarget()
+    lockTargetEnabled = not lockTargetEnabled
+
+    if lockTargetEnabled then
+        local localPlayer = Players.LocalPlayer
+        if not localPlayer.Character or not localPlayer.Team then return end
+
+        local closestPlayer = nil
+        local shortestDistance = math.huge
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= localPlayer 
+               and player.Character 
+               and player.Character:FindFirstChild("Head") 
+               and player.Team ~= localPlayer.Team then
+                local headPos = player.Character.Head.Position
+                local dist = (headPos - camera.CFrame.Position).Magnitude
+                if dist < shortestDistance then
+                    shortestDistance = dist
+                    closestPlayer = player
+                end
+            end
+        end
+        lockedPlayer = closestPlayer
+
+        lockConnection = RunService.RenderStepped:Connect(function()
+            if lockedPlayer 
+               and lockedPlayer.Character 
+               and lockedPlayer.Character:FindFirstChild("Head") then
+
+                local headPos = lockedPlayer.Character.Head.Position
+                local cameraPos = camera.CFrame.Position
+                local newCFrame = CFrame.new(cameraPos, headPos)
+                camera.CFrame = newCFrame
+            end
+        end)
+    else
+        if lockConnection then
+            lockConnection:Disconnect()
+            lockConnection = nil
+        end
+        lockedPlayer = nil
+    end
+end
+
+-- เปิดปิด ESP ด้วยปุ่ม V และ LockTarget ด้วย B
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Enum.KeyCode.V then
+        toggleESP()
+    elseif input.KeyCode == Enum.KeyCode.B then
+        toggleLockTarget()
+    end
+end)
